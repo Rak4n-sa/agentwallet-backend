@@ -1,0 +1,23 @@
+{
+  "name": "agentwallet-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "AgentWallet backend — AI agent financial wallet",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "test:db": "node shared/db.test.js",
+    "test:errors": "node shared/errors.test.js",
+    "test:logger": "SUPABASE_URL=https://placeholder.supabase.co SUPABASE_SERVICE_ROLE_KEY=placeholder-key node shared/logger.test.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.4",
+    "@tokenbound/sdk": "^0.5.5",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "viem": "^2.47.17",
+    "x402": "^1.1.0"
+  }
+}
