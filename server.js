@@ -49,6 +49,7 @@ import { confirmPaymentHandler }         from './receive/confirm.js'
 // ── Payments ──────────────────────────────────────────────────────────────────
 import { sendPaymentHandler }            from './payments/send.js'
 import { paymentHistoryHandler }         from './payments/history.js'
+import { chargeWalletHandler }           from './payments/charge.js'
 
 // ── Rollback ──────────────────────────────────────────────────────────────────
 import { initiateRollbackHandler }       from './rollback/initiate.js'
@@ -64,6 +65,7 @@ import { onramperLinkHandler, onramperWebhookHandler } from './onramp/onramper.j
 // ── Rules ─────────────────────────────────────────────────────────────────────
 import { setTransactionLimit }           from './rules/limits.js'
 import { setBudget }                     from './rules/budget.js'
+import { updateWalletRulesHandler }      from './rules/update.js'
 
 // ── Webhooks ──────────────────────────────────────────────────────────────────
 import { retrySingle }                   from './webhooks/retry.js'
@@ -195,6 +197,9 @@ app.post('/wallets/:id/confirm', apiKeyAuth, confirmPaymentHandler)
 app.post('/payments/send', apiKeyAuth, sendPaymentHandler)
 // POST { idempotency_key, wallet_id, amount, service_url, counterparty? } → { transaction_id, balance }
 
+app.post('/wallets/:id/charge', apiKeyAuth, chargeWalletHandler)
+// POST { service, amount } → { ok, txId, balance } | { ok, reason, txId }
+
 app.get('/payments/history', apiKeyAuth, paymentHistoryHandler)
 // GET ?wallet_id&page&limit&status&type&from&to → { transactions[], total, page, limit }
 
@@ -232,6 +237,9 @@ app.post('/onramp/webhook', onramperWebhookHandler)
 // ══════════════════════════════════════════════════════════════════════════════
 // Routes — Rules
 // ══════════════════════════════════════════════════════════════════════════════
+
+app.patch('/wallets/:id/rules', apiKeyAuth, updateWalletRulesHandler)
+// PATCH { maxPerTransaction?, dailyLimit?, monthlyLimit?, allowlist?, allowlistEnabled? } → rules
 
 app.post('/rules/limits', apiKeyAuth, async (req, res) => {
   // POST { wallet_id, max_amount } → { wallet_id, max_transaction_amount }
