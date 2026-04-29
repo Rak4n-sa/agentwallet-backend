@@ -7,6 +7,7 @@
     "node": ">=18.0.0"
   },
   "scripts": {
+    "start": "node server.js",
     "test:db": "node shared/db.test.js",
     "test:errors": "node shared/errors.test.js",
     "test:logger": "SUPABASE_URL=https://placeholder.supabase.co SUPABASE_SERVICE_ROLE_KEY=placeholder-key node shared/logger.test.js"
