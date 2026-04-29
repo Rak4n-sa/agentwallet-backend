@@ -12,7 +12,7 @@ import { base }                                    from 'viem/chains'
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto'
 import { ExternalServiceError }                    from './errors.js'
 
-const WALLET_MODE  = process.env.WALLET_MODE          ?? 'mock'
+const WALLET_MODE  = process.env.WALLET_MODE          ?? 'eoa'
 const MASTER_KEY   = process.env.WALLET_ENCRYPTION_KEY ?? ''
 
 // ══════════════════════════════════════════════════════════════════════════════
