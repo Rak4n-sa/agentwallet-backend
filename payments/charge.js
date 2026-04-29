@@ -10,8 +10,9 @@
  * لو عدّلته يتأثر: dashboard/walletProfile.js، dashboard/transactions.js
  */
 
-import supabase from '../shared/db.js'
-import logger   from '../shared/logger.js'
+import supabase               from '../shared/db.js'
+import logger                 from '../shared/logger.js'
+import { calcChargeFee }      from '../shared/fees.js'
 import { NotFoundError, ExternalServiceError, ValidationError, formatError } from '../shared/errors.js'
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -31,7 +32,7 @@ function startOfMonth() {
   return d.toISOString()
 }
 
-async function insertTransaction(walletId, developerId, { amount, service, status, reason }) {
+async function insertTransaction(walletId, developerId, { amount, fee = 0, service, status, reason }) {
   const { data, error } = await supabase
     .from('transactions')
     .insert({
@@ -40,7 +41,7 @@ async function insertTransaction(walletId, developerId, { amount, service, statu
       direction:    'outbound',
       type:         'payment',
       amount,
-      fee:          0,
+      fee,
       net_amount:   amount,
       currency:     'USDC',
       service_url:  service,
@@ -147,8 +148,11 @@ export async function chargeWallet(developerId, walletId, { service, amount }) {
     }
   }
 
-  // فحص ٦ — الرصيد
-  if (wallet.balance < amount) {
+  // فحص ٦ — الرصيد (يشمل الرسوم)
+  const fee   = calcChargeFee(amount)
+  const total = Math.round((amount + fee) * 1_000_000) / 1_000_000
+
+  if (wallet.balance < total) {
     return blocked('Insufficient balance')
   }
 
@@ -156,21 +160,21 @@ export async function chargeWallet(developerId, walletId, { service, amount }) {
   // ✅ نجحت — سجّل transaction + حدّث الرصيد
   // ══════════════════════════════════════════════════════════════════════
 
-  const newBalance = Math.round((wallet.balance - amount) * 1_000_000) / 1_000_000
+  const newBalance = Math.round((wallet.balance - total) * 1_000_000) / 1_000_000
 
   const [txId] = await Promise.all([
-    insertTransaction(walletId, developerId, { amount, service, status: 'confirmed' }),
+    insertTransaction(walletId, developerId, { amount, fee, service, status: 'confirmed' }),
     supabase.from('wallets').update({ balance: newBalance }).eq('id', walletId),
   ])
 
   await logger.audit(source, 'charge.success', {
     walletId,
     actorId:  developerId,
-    metadata: { service, amount, newBalance },
+    metadata: { service, amount, fee, newBalance },
     status:   'success',
   })
 
-  return { ok: true, txId, balance: newBalance }
+  return { ok: true, txId, balance: newBalance, fee }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

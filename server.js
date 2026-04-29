@@ -69,6 +69,7 @@ import { updateWalletRulesHandler }      from './rules/update.js'
 
 // ── Webhooks ──────────────────────────────────────────────────────────────────
 import { retrySingle }                   from './webhooks/retry.js'
+import { alchemyWebhookHandler }         from './webhooks/alchemy.js'
 
 // ── Events ────────────────────────────────────────────────────────────────────
 import { start as startOnTransactionCreated }  from './events/onTransactionCreated.js'
@@ -233,6 +234,10 @@ app.get('/onramp/link', apiKeyAuth, onramperLinkHandler)
 app.post('/onramp/webhook', onramperWebhookHandler)
 // POST — عامة، من Onramper مباشرة، بدون API Key
 // التحقق يصير داخلياً عبر HMAC signature
+
+app.post('/webhooks/alchemy', alchemyWebhookHandler)
+// POST — عام، من Alchemy مباشرة
+// يكتشف USDC deposits على Base mainnet ويضيف الرصيد تلقائياً
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Routes — Rules

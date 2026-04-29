@@ -6,9 +6,10 @@
  * يحدّث DB: نعم — جدول agent_wallets + جدول wallets
  */
 
-import { generateWallet, encryptPrivateKey } from '../shared/tokenbound.js'
-import supabase                              from '../shared/db.js'
-import logger                                from '../shared/logger.js'
+import { generateWallet, encryptPrivateKey }  from '../shared/tokenbound.js'
+import { registerAddressWithAlchemy }         from '../webhooks/alchemy.js'
+import supabase                               from '../shared/db.js'
+import logger                                 from '../shared/logger.js'
 import { ExternalServiceError, NotFoundError, formatError } from '../shared/errors.js'
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -67,6 +68,9 @@ export async function createWalletForAgent(walletId, developerId) {
     metadata: { address, walletId },
     status:   'success',
   })
+
+  // سجّل العنوان في Alchemy — لو ما في إعداد يتجاوز بصمت
+  await registerAddressWithAlchemy(address)
 
   return { address, walletId }
 }

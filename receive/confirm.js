@@ -13,6 +13,7 @@
 
 import supabase                        from '../shared/db.js'
 import logger                          from '../shared/logger.js'
+import { calcDepositFee }              from '../shared/fees.js'
 import { checkAndReserve, markComplete, markFailed } from '../shared/idempotency.js'
 import {
   ValidationError,
@@ -81,7 +82,11 @@ export async function confirmPayment(walletId, developerId, input) {
   await checkAndReserve(idempotency_key, walletId)
 
   try {
-    // ── ٤. كتابة الـ transaction في DB ────────────────────────────────────
+    // ── ٤. حساب الرسوم والمبلغ الصافي ────────────────────────────────────
+    const depositFee = calcDepositFee(amount)
+    const netAmount  = Math.round((amount - depositFee) * 1_000_000) / 1_000_000
+
+    // ── ٥. كتابة الـ transaction في DB ────────────────────────────────────
     const { data: transaction, error: txError } = await supabase
       .from('transactions')
       .insert({
@@ -91,14 +96,14 @@ export async function confirmPayment(walletId, developerId, input) {
         direction:    'inbound',
         type:         'onramp',
         amount,
-        fee:          0,
-        net_amount:   amount,
+        fee:          depositFee,
+        net_amount:   netAmount,
         currency:     'USDC',
         counterparty: provider,
         description:  description || `دفعة من ${provider}`,
         status:       'confirmed',
         tx_hash,
-        metadata:     { provider },
+        metadata:     { provider, deposit_fee: depositFee },
         confirmed_at: new Date().toISOString(),
       })
       .select('id')
@@ -108,8 +113,8 @@ export async function confirmPayment(walletId, developerId, input) {
       throw new ExternalServiceError('Supabase', txError.message)
     }
 
-    // ── ٥. تحديث الرصيد في wallets ────────────────────────────────────────
-    const newBalance = Math.round((wallet.balance + amount) * 1_000_000) / 1_000_000
+    // ── ٦. تحديث الرصيد في wallets (صافي بعد الرسوم) ─────────────────────
+    const newBalance = Math.round((wallet.balance + netAmount) * 1_000_000) / 1_000_000
 
     const { error: updateError } = await supabase
       .from('wallets')
@@ -120,20 +125,21 @@ export async function confirmPayment(walletId, developerId, input) {
       throw new ExternalServiceError('Supabase', updateError.message)
     }
 
-    // ── ٦. إتمام الـ idempotency key ──────────────────────────────────────
+    // ── ٧. إتمام الـ idempotency key ──────────────────────────────────────
     await markComplete(idempotency_key, walletId, { transaction_id: transaction.id })
 
-    // ── ٧. audit log ──────────────────────────────────────────────────────
+    // ── ٨. audit log ──────────────────────────────────────────────────────
     await logger.audit(source, 'payment.confirmed', {
       walletId,
       actorId:  developerId,
-      metadata: { transaction_id: transaction.id, amount, provider, tx_hash },
+      metadata: { transaction_id: transaction.id, amount, depositFee, netAmount, provider, tx_hash },
       status:   'success',
     })
 
     return {
       transaction_id: transaction.id,
       balance:        newBalance,
+      fee:            depositFee,
     }
 
   } catch (err) {
