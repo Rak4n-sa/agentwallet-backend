@@ -1,113 +1,72 @@
 /**
  * الملف: shared/tokenbound.js
- * وش يفعل: ينشئ clients للتعامل مع ERC-4337 Smart Accounts على Base Sepolia
- * يستدعيه: wallet/create.js، wallet/balance.js، wallet/address.js
- * يستدعي: shared/errors.js
- * يحدّث DB: لا
- * يطلق Supabase event: لا
- * يسمع Supabase event: لا
- * idempotency: لا
- * rollback: لا
- * لو عدّلته يتأثر: كل ملف يتعامل مع blockchain
+ * وش يفعل: ينشئ EOA wallets حقيقية على Base mainnet أو وهمية في mock mode
+ * يستدعيه: wallet/create.js، wallet/balance.js
+ * WALLET_MODE=mock  → عناوين وهمية للتطوير
+ * WALLET_MODE=eoa   → محافظ EOA حقيقية على Base mainnet
  */
 
-import { createPublicClient, http } from 'viem'
-import { privateKeyToAccount }      from 'viem/accounts'
-import { baseSepolia }              from 'viem/chains'
-import { ExternalServiceError }     from './errors.js'
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
+import { createPublicClient, http }                from 'viem'
+import { base }                                    from 'viem/chains'
+import { createCipheriv, createDecipheriv, randomBytes } from 'crypto'
+import { ExternalServiceError }                    from './errors.js'
+
+const WALLET_MODE  = process.env.WALLET_MODE          ?? 'mock'
+const MASTER_KEY   = process.env.WALLET_ENCRYPTION_KEY ?? ''
 
 // ══════════════════════════════════════════════════════════════════════════════
-// WALLET_MODE — mock أو erc4337
+// Encryption — AES-256-GCM
 // ══════════════════════════════════════════════════════════════════════════════
 
-const WALLET_MODE = process.env.WALLET_MODE ?? 'mock'
-
-// ══════════════════════════════════════════════════════════════════════════════
-// بناء الـ clients حسب الـ mode
-// ══════════════════════════════════════════════════════════════════════════════
-
-let _publicClient
-let _getSmartAccountAddress  // (salt: string) → address: string
-let _deploySmartAccount      // (salt: string) → { address: string, txHash: string | null }
-
-if (WALLET_MODE === 'mock') {
-  // ── Mock Mode — عناوين وهمية بدون Base ─────────────────────────────────
-
-  _publicClient = {
-    readContract: async () => 0n,
+export function encryptPrivateKey(privateKey) {
+  if (!MASTER_KEY || MASTER_KEY.length !== 64) {
+    throw new ExternalServiceError('Encryption', 'WALLET_ENCRYPTION_KEY غير موجود أو طوله غلط (يجب 64 hex char)')
   }
+  const iv        = randomBytes(12)
+  const key       = Buffer.from(MASTER_KEY, 'hex')
+  const cipher    = createCipheriv('aes-256-gcm', key, iv)
+  const encrypted = Buffer.concat([cipher.update(privateKey, 'utf8'), cipher.final()])
+  const tag       = cipher.getAuthTag()
+  return `${iv.toString('hex')}:${encrypted.toString('hex')}:${tag.toString('hex')}`
+}
 
-  // نفس الـ salt دائماً يرجع نفس العنوان — يحاكي الـ counterfactual في ERC-4337
-  _getSmartAccountAddress = (salt) => {
-    const hex = BigInt(salt).toString(16).padStart(40, '0').slice(0, 40)
-    return `0x${hex}`
+export function decryptPrivateKey(encryptedData) {
+  if (!MASTER_KEY || MASTER_KEY.length !== 64) {
+    throw new ExternalServiceError('Encryption', 'WALLET_ENCRYPTION_KEY غير موجود')
   }
-
-  _deploySmartAccount = async (salt) => {
-    const address = _getSmartAccountAddress(salt)
-    return {
-      address,
-      txHash: '0x' + '0'.repeat(64),  // fake tx في الـ mock
-    }
-  }
-
-} else {
-  // ── ERC-4337 Mode — Base Sepolia الحقيقي ─────────────────────────────────
-  // يحتاج: permissionless (npm install permissionless)
-  //        EXECUTOR_PRIVATE_KEY في .env
-  //        BUNDLER_URL في .env (من Pimlico أو أي bundler آخر)
-  //        PAYMASTER_URL في .env (اختياري — لو ما ضبطته المطور يدفع الـ gas)
-
-  const rawKey     = process.env.EXECUTOR_PRIVATE_KEY
-  const bundlerUrl = process.env.BUNDLER_URL
-
-  if (!rawKey) {
-    throw new ExternalServiceError('Blockchain', 'EXECUTOR_PRIVATE_KEY غير موجود في .env')
-  }
-  if (!bundlerUrl) {
-    throw new ExternalServiceError('Blockchain', 'BUNDLER_URL غير موجود في .env')
-  }
-
-  const privateKey = rawKey.startsWith('0x') ? rawKey : `0x${rawKey}`
-  const owner      = privateKeyToAccount(privateKey)
-
-  _publicClient = createPublicClient({
-    chain:     baseSepolia,
-    transport: http(),
-  })
-
-  // ── ERC-4337 Smart Account functions ──────────────────────────────────────
-  // نستورد permissionless بشكل dynamic — مش نكسر الـ mock mode لو الـ package غير مثبّت
-  const { signerToSimpleSmartAccount } = await import('permissionless/accounts')
-
-  // SimpleAccountFactory على Base Sepolia (ERC-4337 standard factory)
-  const SIMPLE_ACCOUNT_FACTORY = '0x9406Cc6185a346906296840746125a0E44976454'
-  const ENTRY_POINT            = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789'
-
-  // يحسب Smart Account address بدون deployment (counterfactual)
-  // نفس الـ owner + نفس الـ salt دائماً = نفس العنوان
-  _getSmartAccountAddress = async (salt) => {
-    const account = await signerToSimpleSmartAccount(_publicClient, {
-      signer:         owner,
-      factoryAddress: SIMPLE_ACCOUNT_FACTORY,
-      entryPoint:     ENTRY_POINT,
-      salt:           BigInt(salt),
-    })
-    return account.address
-  }
-
-  // في ERC-4337 الـ deployment يصير تلقائياً عند أول UserOperation
-  // نرجع العنوان الـ counterfactual — txHash يظهر لاحقاً عند أول عملية
-  _deploySmartAccount = async (salt) => {
-    const address = await _getSmartAccountAddress(salt)
-    return { address, txHash: null }
-  }
+  const [ivHex, encHex, tagHex] = encryptedData.split(':')
+  const iv       = Buffer.from(ivHex,  'hex')
+  const enc      = Buffer.from(encHex, 'hex')
+  const tag      = Buffer.from(tagHex, 'hex')
+  const key      = Buffer.from(MASTER_KEY, 'hex')
+  const decipher = createDecipheriv('aes-256-gcm', key, iv)
+  decipher.setAuthTag(tag)
+  return decipher.update(enc).toString('utf8') + decipher.final('utf8')
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Exports
+// generateWallet — ينشئ EOA جديد
 // ══════════════════════════════════════════════════════════════════════════════
 
-export const publicClient           = _publicClient
-export const getSmartAccountAddress = _getSmartAccountAddress
-export const deploySmartAccount     = _deploySmartAccount
+export function generateWallet() {
+  if (WALLET_MODE === 'mock') {
+    const fakeKey  = '0x' + randomBytes(32).toString('hex')
+    const fakeAddr = '0x' + randomBytes(20).toString('hex')
+    return { address: fakeAddr, privateKey: fakeKey }
+  }
+
+  const privateKey = generatePrivateKey()
+  const account    = privateKeyToAccount(privateKey)
+  return { address: account.address, privateKey }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// publicClient — للقراءة من البلوكشين
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const publicClient = WALLET_MODE === 'eoa'
+  ? createPublicClient({ chain: base, transport: http() })
+  : { readContract: async () => 0n }
+
+export { WALLET_MODE }

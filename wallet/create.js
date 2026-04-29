@@ -1,31 +1,20 @@
 /**
  * الملف: wallet/create.js
- * وش يفعل: ينشئ ERC-4337 Smart Account لمحفظة موجودة ويحفظ العنوان في DB
+ * وش يفعل: ينشئ EOA wallet لمحفظة موجودة — يولّد عنوان + يشفّر الـ private key
  * يستدعيه: HTTP POST /wallets/:id/blockchain
  * يستدعي: shared/tokenbound.js، shared/db.js، shared/logger.js، shared/errors.js
  * يحدّث DB: نعم — جدول agent_wallets + جدول wallets
- * يطلق Supabase event: لا
- * يسمع Supabase event: لا
- * idempotency: لا
- * rollback: لا
- * لو عدّلته يتأثر: wallet/balance.js، wallet/address.js، receive/link.js
  */
 
-import { randomBytes }                                 from 'crypto'
-import { getSmartAccountAddress, deploySmartAccount } from '../shared/tokenbound.js'
-import supabase                                        from '../shared/db.js'
-import logger                                          from '../shared/logger.js'
+import { generateWallet, encryptPrivateKey } from '../shared/tokenbound.js'
+import supabase                              from '../shared/db.js'
+import logger                                from '../shared/logger.js'
 import { ExternalServiceError, NotFoundError, formatError } from '../shared/errors.js'
 
 // ══════════════════════════════════════════════════════════════════════════════
 // createWalletForAgent — المنطق الرئيسي
 // ══════════════════════════════════════════════════════════════════════════════
 
-/**
- * @param {string} walletId
- * @param {string} developerId
- * @returns {{ smart_account_address: string, salt: string, deploy_tx: string | null }}
- */
 export async function createWalletForAgent(walletId, developerId) {
   const source = 'wallet/create.js'
 
@@ -37,88 +26,55 @@ export async function createWalletForAgent(walletId, developerId) {
     .eq('developer_id', developerId)
     .single()
 
-  if (fetchError) {
-    throw new ExternalServiceError('Supabase', fetchError.message)
-  }
-  if (!wallet) {
-    throw new NotFoundError('محفظة')
-  }
+  if (fetchError) throw new ExternalServiceError('Supabase', fetchError.message)
+  if (!wallet)   throw new NotFoundError('محفظة')
 
-  // ── ٢. التحقق من وجود Smart Account مسبقاً — نرجع البيانات الموجودة ──
+  // ── ٢. لو عنده عنوان بالفعل — رجّع الموجود ──────────────────────────
   const { data: existing } = await supabase
     .from('agent_wallets')
-    .select('tba_address, token_id, mint_tx')
+    .select('tba_address, token_id')
     .eq('wallet_id', walletId)
     .maybeSingle()
 
   if (existing) {
-    return {
-      smart_account_address: existing.tba_address,
-      salt:                  existing.token_id,
-      deploy_tx:             existing.mint_tx,
-    }
+    return { address: existing.tba_address, walletId }
   }
 
-  // ── ٣. توليد salt فريد — يحدد عنوان الـ Smart Account تحديداً كاملاً ──
-  // نفس الـ owner + نفس الـ salt = نفس العنوان دائماً (ERC-4337 counterfactual)
-  // crypto.randomBytes آمن تشفيرياً — أفضل من Math.random()
-  const salt = BigInt('0x' + randomBytes(16).toString('hex'))
+  // ── ٣. توليد EOA wallet جديد ──────────────────────────────────────────
+  const { address, privateKey } = generateWallet()
 
-  // ── ٤. حساب Smart Account address (بدون deployment) ─────────────────
-  const smartAccountAddress = await getSmartAccountAddress(salt.toString())
+  // ── ٤. تشفير الـ private key — لا يُحفظ plain text أبداً ─────────────
+  const encryptedKey = encryptPrivateKey(privateKey)
 
-  // ── ٥. إنشاء Smart Account على البلوكشين ─────────────────────────────
-  // في ERC-4337: الـ deployment يصير عند أول UserOperation تلقائياً
-  // في mock: يرجع fake address + fake txHash
-  let deployTx
-  try {
-    const result = await deploySmartAccount(salt.toString())
-    deployTx = result.txHash
-  } catch (err) {
-    throw new ExternalServiceError('Blockchain', err.message)
-  }
-
-  // ── ٦. حفظ في agent_wallets وتحديث wallets في نفس الوقت ──────────────
+  // ── ٥. حفظ في DB ──────────────────────────────────────────────────────
   const [insertResult, updateResult] = await Promise.all([
     supabase.from('agent_wallets').insert({
-      wallet_id:    walletId,
-      token_id:     salt.toString(),     // salt مخزون في حقل token_id
-      tba_address:  smartAccountAddress, // Smart Account address في حقل tba_address
-      nft_contract: null,                // لا يوجد NFT في ERC-4337
-      mint_tx:      deployTx,
+      wallet_id:             walletId,
+      token_id:              address,
+      tba_address:           address,
+      nft_contract:          null,
+      mint_tx:               null,
+      encrypted_private_key: encryptedKey,
     }),
-    supabase.from('wallets').update({ tba_address: smartAccountAddress }).eq('id', walletId),
+    supabase.from('wallets').update({ tba_address: address }).eq('id', walletId),
   ])
 
-  if (insertResult.error) {
-    throw new ExternalServiceError('Supabase', insertResult.error.message)
-  }
-  if (updateResult.error) {
-    throw new ExternalServiceError('Supabase', updateResult.error.message)
-  }
+  if (insertResult.error) throw new ExternalServiceError('Supabase', insertResult.error.message)
+  if (updateResult.error) throw new ExternalServiceError('Supabase', updateResult.error.message)
 
-  // ── ٧. audit log ──────────────────────────────────────────────────────
-  await logger.audit(source, 'wallet.blockchain_created', {
+  await logger.audit(source, 'wallet.eoa_created', {
     actorId:  developerId,
-    metadata: { smart_account_address: smartAccountAddress, salt: salt.toString(), deploy_tx: deployTx },
+    metadata: { address, walletId },
     status:   'success',
   })
 
-  return {
-    smart_account_address: smartAccountAddress,
-    salt:                  salt.toString(),
-    deploy_tx:             deployTx,
-  }
+  return { address, walletId }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Route Handler — Express
+// Route Handler
 // ══════════════════════════════════════════════════════════════════════════════
 
-/**
- * POST /wallets/:id/blockchain
- * يحتاج: auth middleware يضيف req.user
- */
 export async function createWalletBlockchainHandler(req, res) {
   try {
     const result = await createWalletForAgent(req.params.id, req.user.id)
