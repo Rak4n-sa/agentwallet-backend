@@ -17,7 +17,7 @@ import logger from '../shared/logger.js'
 import { AuthenticationError, AuthorizationError, ExternalServiceError, formatError } from '../shared/errors.js'
 
 // ── ثوابت ────────────────────────────────────────────────────────────────────
-const KEY_PREFIX    = 'aw_'       // كل key يبدأ بـ aw_ (AgentWallet)
+const KEY_PREFIX    = 'vw_'       // كل key يبدأ بـ vw_ (virewallet)
 const KEY_BYTES     = 32          // 32 byte = 256 bit عشوائي
 const HASH_ALG      = 'sha256'    // خوارزمية الـ hash
 

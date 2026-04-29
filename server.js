@@ -305,7 +305,7 @@ function startEventListeners() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 app.listen(PORT, () => {
-  logger.info('server.js', `AgentWallet Backend شغّال على port ${PORT} ✓`)
+  logger.info('server.js', `virewallet Backend شغّال على port ${PORT} ✓`)
   startEventListeners()
 })
 
