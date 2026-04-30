@@ -30,6 +30,7 @@ import { overviewHandler }               from './dashboard/overview.js'
 import { transactionsHandler }           from './dashboard/transactions.js'
 import { statsHandler }                  from './dashboard/stats.js'
 import { walletProfileHandler }          from './dashboard/walletProfile.js'
+import { platformEarningsHandler }       from './dashboard/earnings.js'
 
 // ── Wallets ───────────────────────────────────────────────────────────────────
 import { createWalletHandler }           from './wallets/create.js'
@@ -156,6 +157,7 @@ app.get('/dashboard/stats', apiKeyAuth, statsHandler)
 // GET ?dailyDays&monthlyCount → { summary, daily[], monthly[], byType[] }
 
 app.get('/dashboard/wallet/:id', apiKeyAuth, walletProfileHandler)
+app.get('/dashboard/earnings',  apiKeyAuth, platformEarningsHandler)
 // GET → { wallet, totals, top_apis, rules, budget_usage, limit_exceeded_count, last_auto_stop }
 
 // ══════════════════════════════════════════════════════════════════════════════

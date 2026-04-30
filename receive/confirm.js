@@ -125,7 +125,18 @@ export async function confirmPayment(walletId, developerId, input) {
       throw new ExternalServiceError('Supabase', updateError.message)
     }
 
-    // ── ٧. إتمام الـ idempotency key ──────────────────────────────────────
+    // ── ٧. تسجيل ربح المنصة ──────────────────────────────────────────────
+    await supabase.from('platform_earnings').insert({
+      transaction_id: transaction.id,
+      wallet_id:      walletId,
+      developer_id:   developerId,
+      fee_type:       'deposit',
+      gross_amount:   amount,
+      fee_amount:     depositFee,
+      fee_rate:       process.env.DEPOSIT_FEE_RATE ?? 0.005,
+    })
+
+    // ── ٨. إتمام الـ idempotency key ──────────────────────────────────────
     await markComplete(idempotency_key, walletId, { transaction_id: transaction.id })
 
     // ── ٨. audit log ──────────────────────────────────────────────────────

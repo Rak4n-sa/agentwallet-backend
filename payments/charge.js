@@ -167,6 +167,17 @@ export async function chargeWallet(developerId, walletId, { service, amount }) {
     supabase.from('wallets').update({ balance: newBalance }).eq('id', walletId),
   ])
 
+  // تسجيل ربح المنصة
+  await supabase.from('platform_earnings').insert({
+    transaction_id: txId,
+    wallet_id:      walletId,
+    developer_id:   developerId,
+    fee_type:       'charge',
+    gross_amount:   amount,
+    fee_amount:     fee,
+    fee_rate:       process.env.CHARGE_FEE_RATE ?? 0.01,
+  })
+
   await logger.audit(source, 'charge.success', {
     walletId,
     actorId:  developerId,
