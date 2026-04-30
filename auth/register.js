@@ -56,24 +56,21 @@ export async function register({ name, email, password }) {
   validateInput({ name, email, password })
 
   // ── ٢. إنشاء المستخدم في Supabase Auth ───────────────────────────────
-  // admin.createUser يعمل من الـ backend بـ SERVICE_ROLE_KEY
-  // email_confirm: false — لا نحتاج تأكيد إيميل في الـ MVP
-  const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-    email:            email.toLowerCase().trim(),
+  const { data: authData, error: authError } = await supabase.auth.signUp({
+    email:    email.toLowerCase().trim(),
     password,
-    email_confirm:    true,
-    user_metadata:    { name: name.trim() },
+    options:  { data: { name: name.trim() } },
   })
 
   if (authError) {
-    // الـ email مستخدم مسبقاً
-    if (authError.message?.includes('already been registered') || authError.code === 'email_exists') {
+    if (authError.message?.includes('already registered') || authError.code === 'user_already_exists') {
       throw new ValidationError('هذا البريد الإلكتروني مسجّل مسبقاً')
     }
     throw new Error(`[auth/register.js] فشل إنشاء المستخدم: ${authError.message}`)
   }
 
   const authUser = authData.user
+  if (!authUser) throw new ValidationError('هذا البريد الإلكتروني مسجّل مسبقاً')
 
   // ── ٣. إنشاء سجل developer في DB ─────────────────────────────────────
   // نحفظ بيانات إضافية عن المطور خارج Supabase Auth
