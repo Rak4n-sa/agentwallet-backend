@@ -102,7 +102,7 @@ export async function getTransactions(developerId, filters = {}) {
   // ── ٤. بناء الـ query ─────────────────────────────────────────────────
   let query = supabase
     .from('transactions')
-    .select('id, wallet_id, amount, type, status, tx_hash, created_at', { count: 'exact' })
+    .select('id, wallet_id, amount, type, status, tx_hash, service_url, counterparty, description, created_at', { count: 'exact' })
     .in('wallet_id', walletIds)
     .order('created_at', { ascending: false })
     .range(from, to)
